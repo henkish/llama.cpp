@@ -446,6 +446,11 @@ struct ggml_backend_meta_split_state llama_meta_device_get_split_state(const str
             return ret;
         };
 
+        // a Gemma 4 assistant (MTP drafter) attends into the target's KV cache with its own Q/O weights, so for
+        // each layer the drafter's head split has to match the target's cache split; the rotation below is derived
+        // from each model's own layer index and disagrees between the two, so disable it for both models
+        const bool no_rotation = ud->model->arch == LLM_ARCH_GEMMA4 || ud->model->arch == LLM_ARCH_GEMMA4_ASSISTANT;
+
         uint32_t il;
         std::string prefix;
         size_t rotation;
@@ -454,13 +459,13 @@ struct ggml_backend_meta_split_state llama_meta_device_get_split_state(const str
             GGML_ASSERT(length_prefix != std::string::npos);
             prefix = tensor_name.substr(0, length_prefix + 1);
             il = std::stoull(tensor_name.substr(4, length_prefix));
-            rotation = get_il_eff(il) % ud->n_devices;
+            rotation = no_rotation ? 0 : get_il_eff(il) % ud->n_devices;
         } else if (tensor_name.substr(0, 6) == "cache_") {
             const size_t layer_index_start = tensor_name.find("_l", 6);
             GGML_ASSERT(layer_index_start != std::string::npos);
             il = std::stoull(tensor_name.substr(layer_index_start + 2));
             prefix = "blk." + std::to_string(il) + ".";
-            rotation = get_il_eff(il) % ud->n_devices;
+            rotation = no_rotation ? 0 : get_il_eff(il) % ud->n_devices;
         } else {
             il = 0;
             rotation = hparams.n_layer() % ud->n_devices;
