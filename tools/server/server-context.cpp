@@ -4243,6 +4243,9 @@ private:
 
             GGML_ASSERT(n_draft > 0);
 
+            // batch indices of the target logits that each accepted token is checked against
+            std::vector<int32_t> i_batch_tgt;
+
             // verify and try to accept the draft
             {
                 common_sampler_ptr smpl_save(common_sampler_clone(slot.smpl.get()));
@@ -4267,6 +4270,7 @@ private:
                 } else {
                     accepted = common_sampler_sample_and_accept_n(slot.smpl.get(), slot.ctx_tgt, slot.spec_i_batch, slot.spec_draft);
                 }
+                i_batch_tgt = std::move(slot.spec_i_batch);
                 slot.spec_i_batch.clear();
 
                 GGML_ASSERT(accepted.size() >= 1);
@@ -4352,9 +4356,13 @@ private:
 
                 result.tok          = ids[i];
                 result.text_to_send = common_token_to_piece(slot.ctx_tgt, result.tok, accept_special_token(slot, result.tok));
-                result.prob         = 1.0f; // set later
+                result.prob         = 1.0f;
 
-                // TODO: set result.probs
+                // the target logits of the whole draft batch are still available here
+                // TODO: post-sampling probs (the sampler only keeps the candidates of its last sample)
+                if (slot.task->params.sampling.n_probs > 0 && !slot.task->params.post_sampling_probs) {
+                    populate_token_probs(slot, result, false, params_base.special, i_batch_tgt[i]);
+                }
 
                 slot.stats.n_gen += 1;
 
